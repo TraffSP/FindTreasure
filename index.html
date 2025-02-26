@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Знайди скарб</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            touch-action: manipulation;
+            overflow: hidden;
+            position: relative;
+            height: 100vh;
+            width: 100vw;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        #score-container {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 10px;
+            font-size: 18px;
+            z-index: 100;
+        }
+        
+        #treasure {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="25" y="40" width="50" height="40" fill="%23A97142" stroke="%23000" stroke-width="3"/><rect x="30" y="45" width="40" height="30" fill="%23D4AF37" stroke="%23000" stroke-width="2"/><circle cx="50" cy="60" r="5" fill="%23FFC107"/><circle cx="40" cy="55" r="3" fill="%23FFC107"/><circle cx="60" cy="55" r="3" fill="%23FFC107"/></svg>');
+            background-size: contain;
+            background-repeat: no-repeat;
+            display: none;
+            z-index: 10;
+        }
+        
+        #click-feedback {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            z-index: 200;
+            display: none;
+        }
+
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 20px 2px;
+            cursor: pointer;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score-container">Рахунок: <span id="score">0</span></div>
+        <div id="treasure"></div>
+        <div id="click-feedback"></div>
+        <div id="game-over">
+            <h2>Гра закінчена!</h2>
+            <p>Ваш рахунок: <span id="final-score">0</span></p>
+            <button id="restart-button">Почати знову</button>
+        </div>
+    </div>
+    
+    <script>
+        // Ініціалізація Telegram Web App
+        const tgApp = window.Telegram.WebApp;
+        tgApp.expand(); // Розгортаємо на весь екран
+        tgApp.ready(); // Повідомляємо Telegram, що додаток готовий
+        
+        // Змінні гри
+        let score = 0;
+        let timeLeft = 30; // 30 секунд на гру
+        let gameActive = true;
+        
+        // Елементи DOM
+        const gameContainer = document.getElementById('game-container');
+        const scoreElement = document.getElementById('score');
+        const finalScoreElement = document.getElementById('final-score');
+        const treasure = document.getElementById('treasure');
+        const clickFeedback = document.getElementById('click-feedback');
+        const gameOverScreen = document.getElementById('game-over');
+        const restartButton = document.getElementById('restart-button');
+        
+        // Функція для розміщення скарбу в випадковому місці
+        function placeTreasure() {
+            const maxX = gameContainer.clientWidth - 50;
+            const maxY = gameContainer.clientHeight - 50;
+            
+            const randomX = Math.floor(Math.random() * maxX);
+            const randomY = Math.floor(Math.random() * maxY);
+            
+            treasure.style.left = randomX + 'px';
+            treasure.style.top = randomY + 'px';
+            treasure.style.display = 'block';
+        }
+        
+        // Функція показу відгуку на клік
+        function showClickFeedback(x, y, isHot) {
+            clickFeedback.style.left = (x - 25) + 'px';
+            clickFeedback.style.top = (y - 25) + 'px';
+            
+            // Розраховуємо "тепло" кліка (близькість до скарбу)
+            const treasureX = parseInt(treasure.style.left) + 25;
+            const treasureY = parseInt(treasure.style.top) + 25;
+            
+            const distance = Math.sqrt(Math.pow(x - treasureX, 2) + Math.pow(y - treasureY, 2));
+            
+            // Колір залежить від відстані до скарбу
+            let color;
+            if (isHot) {
+                color = '#FFD700'; // золотий для знайденого скарбу
+            } else if (distance < 100) {
+                color = '#FF0000'; // червоний для гарячого
+            } else if (distance < 200) {
+                color = '#FFA500'; // оранжевий для теплого
+            } else {
+                color = '#0000FF'; // синій для холодного
+            }
+            
+            clickFeedback.innerHTML = `<svg width="50" height="50"><circle cx="25" cy="25" r="20" fill="${color}" opacity="0.7" /></svg>`;
+            clickFeedback.style.opacity = 1;
+            
+            setTimeout(() => {
+                clickFeedback.style.opacity = 0;
+            }, 500);
+        }
+        
+        // Обробник кліка на контейнер гри
+        gameContainer.addEventListener('click', function(event) {
+            if (!gameActive) return;
+            
+            const x = event.clientX;
+            const y = event.clientY;
+            
+            const treasureX = parseInt(treasure.style.left) + 25;
+            const treasureY = parseInt(treasure.style.top) + 25;
+            
+            const distance = Math.sqrt(Math.pow(x - treasureX, 2) + Math.pow(y - treasureY, 2));
+            
+            if (distance < 30) { // Знайшли скарб
+                score += 10;
+                scoreElement.textContent = score;
+                showClickFeedback(x, y, true);
+                placeTreasure();
+                
+                // Створюємо анімацію знайденого скарбу
+                const foundAnimation = document.createElement('div');
+                foundAnimation.style.position = 'absolute';
+                foundAnimation.style.left = (x - 50) + 'px';
+                foundAnimation.style.top = (y - 50) + 'px';
+                foundAnimation.style.fontSize = '24px';
+                foundAnimation.style.color = '#FFD700';
+                foundAnimation.style.zIndex = '50';
+                foundAnimation.style.transition = 'transform 1s, opacity 1s';
+                foundAnimation.innerHTML = '+10';
+                
+                gameContainer.appendChild(foundAnimation);
+                
+                // Анімуємо текст вгору та зникнення
+                setTimeout(() => {
+                    foundAnimation.style.transform = 'translateY(-50px)';
+                    foundAnimation.style.opacity = '0';
+                }, 10);
+                
+                setTimeout(() => {
+                    gameContainer.removeChild(foundAnimation);
+                }, 1000);
+                
+                // Вібрація через Telegram API (якщо доступно)
+                if (tgApp.HapticFeedback) {
+                    tgApp.HapticFeedback.notificationOccurred('success');
+                }
+            } else {
+                // Показуємо зворотний зв'язок, наскільки близько ми до скарбу
+                showClickFeedback(x, y, false);
+            }
+        });
+        
+        // Обробник для кнопки рестарту
+        restartButton.addEventListener('click', function() {
+            score = 0;
+            scoreElement.textContent = score;
+            gameActive = true;
+            gameOverScreen.style.display = 'none';
+            placeTreasure();
+            startGameTimer();
+        });
+        
+        // Функція закінчення гри
+        function endGame() {
+            gameActive = false;
+            finalScoreElement.textContent = score;
+            gameOverScreen.style.display = 'flex';
+            treasure.style.display = 'none';
+            
+            // Відправляємо результат в Telegram (якщо потрібно)
+            if (tgApp.sendData) {
+                tgApp.sendData(JSON.stringify({
+                    action: 'game_finished',
+                    score: score
+                }));
+            }
+        }
+        
+        // Таймер гри
+        function startGameTimer() {
+            timeLeft = 30;
+            const timerInterval = setInterval(() => {
+                timeLeft--;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    endGame();
+                }
+            }, 1000);
+        }
+        
+        // Ініціалізація гри
+        placeTreasure();
+        startGameTimer();
+    </script>
+</body>
+</html>
